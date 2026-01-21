@@ -1,6 +1,6 @@
 """
 Questions:
- 
+
 
     1. Complete the `MiniVenmo.create_user()` method to allow our application to create new users.
 
@@ -27,9 +27,11 @@ baby. In order to make this happen, you must write a social payment app.
 Implement a program that will feature users, credit cards, and payment feeds.
 """
 
+from abc import ABC, abstractmethod
 import re
 import unittest
 import uuid
+from typing import List
 
 
 class UsernameException(Exception):
@@ -44,50 +46,45 @@ class CreditCardException(Exception):
     pass
 
 
-class Payment:
-
-    def __init__(self, amount, actor, target, note):
-        self.id = str(uuid.uuid4())
-        self.amount = float(amount)
-        self.actor = actor
-        self.target = target
-        self.note = note
+class Activity(ABC):
+    @abstractmethod
+    def to_string(self):
+        pass
 
 
 class User:
-
     def __init__(self, username):
         self.credit_card_number = None
         self.balance = 0.0
-        self.payments = []
+        self.activity: List[Activity] = []
+        self.friends = []
 
         if self._is_valid_username(username):
             self.username = username
         else:
-            raise UsernameException('Username not valid.')
+            raise UsernameException("Username not valid.")
 
     def retrieve_feed(self):
-        return self.payments
+        return self.activity
 
     def add_friend(self, new_friend):
-        # TODO: add code here
-        pass
+        self.friends.append(new_friend)
+        self.activity.append(Friendship(self, new_friend))
 
     def add_to_balance(self, amount):
         self.balance += float(amount)
 
     def add_credit_card(self, credit_card_number):
         if self.credit_card_number is not None:
-            raise CreditCardException('Only one credit card per user!')
+            raise CreditCardException("Only one credit card per user!")
 
         if self._is_valid_credit_card(credit_card_number):
             self.credit_card_number = credit_card_number
 
         else:
-            raise CreditCardException('Invalid credit card number.')
+            raise CreditCardException("Invalid credit card number.")
 
     def pay(self, target, amount, note):
-
         try:
             return self.pay_with_balance(target, amount, note)
         except PaymentException:
@@ -97,19 +94,19 @@ class User:
         amount = float(amount)
 
         if self.username == target.username:
-            raise PaymentException('User cannot pay themselves.')
+            raise PaymentException("User cannot pay themselves.")
 
         elif amount <= 0.0:
-            raise PaymentException('Amount must be a non-negative number.')
+            raise PaymentException("Amount must be a non-negative number.")
 
         elif self.credit_card_number is None:
-            raise PaymentException('Must have a credit card to make a payment.')
+            raise PaymentException("Must have a credit card to make a payment.")
 
         self._charge_credit_card(self.credit_card_number)
 
         payment = Payment(amount, self, target, note)
         target.add_to_balance(amount)
-        self.payments.append(payment)
+        self.activity.append(payment)
 
         return payment
 
@@ -117,48 +114,75 @@ class User:
         amount = float(amount)
 
         if self.username == target.username:
-            raise PaymentException('User cannot pay themselves.')
+            raise PaymentException("User cannot pay themselves.")
 
         elif amount <= 0.0:
-            raise PaymentException('Amount must be a non-negative number.')
+            raise PaymentException("Amount must be a non-negative number.")
 
         elif self.balance <= 0:
-            raise PaymentException('Not enough balance to pay.')
+            raise PaymentException("Not enough balance to pay.")
 
         self.balance -= amount
 
         payment = Payment(amount, self, target, note)
         target.add_to_balance(amount)
-        self.payments.append(payment)
+        self._add_activity(payment)
 
         return payment
 
+    def _add_activity(self, activity: Activity):
+        # this can be extended to support other types of activities, by providing an Activity base class for Payment
+        self.activity.append(activity)
 
-    def _is_valid_credit_card(self, credit_card_number):
+    @staticmethod
+    def _is_valid_credit_card(credit_card_number):
         return credit_card_number in ["4111111111111111", "4242424242424242"]
 
-    def _is_valid_username(self, username):
-        return re.match('^[A-Za-z0-9_\\-]{4,15}$', username)
+    @staticmethod
+    def _is_valid_username(username):
+        return re.match("^[A-Za-z0-9_\\-]{4,15}$", username)
 
-    def _charge_credit_card(self, credit_card_number):
+    @staticmethod
+    def _charge_credit_card(credit_card_number):
         # magic method that charges a credit card thru the card processor
         pass
 
 
-class MiniVenmo:
+class Payment(Activity):
+    def __init__(self, amount: float, actor: User, target: User, note: str):
+        self.id = str(uuid.uuid4())
+        self.amount = float(amount)
+        self.actor = actor
+        self.target = target
+        self.note = note
 
-    def create_user(self, username, balance, credit_card_number):
+    def to_string(self):
+        feed = f"{self.actor.username} paid {self.target.username} ${self.amount}"
+        feed += f" for {self.note}" if self.note else ""
+        return feed
+
+
+class Friendship(Activity):
+    def __init__(self, actor: User, target: User):
+        self.actor = actor
+        self.target = target
+
+    def to_string(self):
+        return f"{self.actor.username} befriended {self.target.username}"
+
+
+class MiniVenmo:
+    @staticmethod
+    def create_user(username, balance, credit_card_number):
         user = User(username)
         user.add_credit_card(credit_card_number)
         user.add_to_balance(float(balance))
         return user
 
-    def render_feed(self, feed):
-        for payment in feed:
-            feed = f"{payment.actor.username} paid {payment.target.username} ${payment.amount}"
-            feed += f" for {payment.note}" if payment.note else ''
-            print(feed)
-
+    @staticmethod
+    def render_feed(feed):
+        for activity in feed:
+            print(activity.to_string())
 
     @classmethod
     def run(cls):
@@ -173,22 +197,24 @@ class MiniVenmo:
 
             # should complete using card
             carol.pay(bobby, 15.00, "Lunch")
+
+            carol.add_friend(bobby)
+
         except PaymentException as e:
             print(e)
 
-        feed = bobby.retrieve_feed()
-        venmo.render_feed(feed)
+        venmo.render_feed(bobby.retrieve_feed())
+        venmo.render_feed(carol.retrieve_feed())
 
         bobby.add_friend(carol)
 
 
 class TestUser(unittest.TestCase):
-
     def test_this_works(self):
         with self.assertRaises(UsernameException):
             raise UsernameException()
 
 
-if __name__ == '__main__':
-    #unittest.main()
+if __name__ == "__main__":
     MiniVenmo.run()
+    unittest.main()
