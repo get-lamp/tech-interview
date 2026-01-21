@@ -67,7 +67,6 @@ class User:
             raise UsernameException('Username not valid.')
 
     def retrieve_feed(self):
-        # TODO: add code here
         return self.payments
 
     def add_friend(self, new_friend):
@@ -107,8 +106,10 @@ class User:
             raise PaymentException('Must have a credit card to make a payment.')
 
         self._charge_credit_card(self.credit_card_number)
+
         payment = Payment(amount, self, target, note)
         target.add_to_balance(amount)
+        self.payments.append(payment)
 
         return payment
 
@@ -128,6 +129,7 @@ class User:
 
         payment = Payment(amount, self, target, note)
         target.add_to_balance(amount)
+        self.payments.append(payment)
 
         return payment
 
@@ -152,9 +154,10 @@ class MiniVenmo:
         return user
 
     def render_feed(self, feed):
-
-        for entry in feed:
-            pass
+        for payment in feed:
+            feed = f"{payment.actor.username} paid {payment.target.username} ${payment.amount}"
+            feed += f" for {payment.note}" if payment.note else ''
+            print(feed)
 
 
     @classmethod
@@ -187,4 +190,5 @@ class TestUser(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    #unittest.main()
+    MiniVenmo.run()
