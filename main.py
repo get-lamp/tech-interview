@@ -30,6 +30,7 @@ Implement a program that will feature users, credit cards, and payment feeds.
 from abc import ABC, abstractmethod
 import re
 import unittest
+from unittest.mock import patch, Mock
 import uuid
 from typing import List
 
@@ -44,6 +45,18 @@ class PaymentException(Exception):
 
 class CreditCardException(Exception):
     pass
+
+
+def transaction(func):
+    def wrapper(*args, **kwargs):
+        # open a transaction
+        try:
+            return func(*args, **kwargs)
+        except Exception:
+            # rollback the transaction
+            raise
+
+    return wrapper
 
 
 class Activity(ABC):
@@ -90,16 +103,13 @@ class User:
         except PaymentException:
             return self.pay_with_card(target, amount, note)
 
+    @transaction
     def pay_with_card(self, target, amount, note):
         amount = float(amount)
 
-        if self.username == target.username:
-            raise PaymentException("User cannot pay themselves.")
+        Payment.validate(self, target, amount)
 
-        elif amount <= 0.0:
-            raise PaymentException("Amount must be a non-negative number.")
-
-        elif self.credit_card_number is None:
+        if self.credit_card_number is None:
             raise PaymentException("Must have a credit card to make a payment.")
 
         self._charge_credit_card(self.credit_card_number)
@@ -110,22 +120,19 @@ class User:
 
         return payment
 
+    @transaction
     def pay_with_balance(self, target, amount, note):
         amount = float(amount)
 
-        if self.username == target.username:
-            raise PaymentException("User cannot pay themselves.")
+        Payment.validate(self, target, amount)
 
-        elif amount <= 0.0:
-            raise PaymentException("Amount must be a non-negative number.")
-
-        elif self.balance <= 0:
+        if self.balance <= 0:
             raise PaymentException("Not enough balance to pay.")
 
-        self.balance -= amount
+        self.add_to_balance(-amount)
+        target.add_to_balance(amount)
 
         payment = Payment(amount, self, target, note)
-        target.add_to_balance(amount)
         self._add_activity(payment)
 
         return payment
@@ -155,6 +162,15 @@ class Payment(Activity):
         self.actor = actor
         self.target = target
         self.note = note
+
+    @staticmethod
+    def validate(sender: User, receipt: User, amount: float):
+
+        if sender.username == receipt.username:
+            raise PaymentException("User cannot pay themselves.")
+
+        elif amount <= 0.0:
+            raise PaymentException("Amount must be a non-negative number.")
 
     def to_string(self):
         feed = f"{self.actor.username} paid {self.target.username} ${self.amount}"
@@ -210,9 +226,64 @@ class MiniVenmo:
 
 
 class TestUser(unittest.TestCase):
-    def test_this_works(self):
-        with self.assertRaises(UsernameException):
-            raise UsernameException()
+
+    def test_add_to_balance_positive_and_negative(self):
+        user = User('Bobby')
+
+        user.add_to_balance(5)
+        self.assertEqual(user.balance, 5.00)
+
+        user.add_to_balance(-10.0)
+        self.assertEqual(user.balance, -5.0)
+
+    def test_user_cannot_pay_itself(self):
+        user = User('Bobby')
+
+        with self.assertRaises(PaymentException) as err:
+            user.pay(user, 5.00, "Coffee")
+            self.assertEqual(str(err.exception), "Users cannot pay themselves")
+
+    def test_pay_uses_balance(self):
+        pass
+
+    def test_pay_with_card_fails_without_card(self):
+        user = User('Bobby')
+        user2 = User('Carol')
+
+        with self.assertRaises(PaymentException) as err:
+            user.pay_with_card(user2, 5.00, "Coffee")
+            self.assertEqual(str(err.exception), "Must have a credit card to make a payment")
+
+    @patch.object(User, 'pay_with_balance', side_effect=PaymentException("Not enough balance to pay."))
+    def test_pay_fail_balance_fallback_to_credit_card(self, mock_pay_with_balance):
+
+        user = User('Bobby')
+        user.credit_card_number = "4111111111111111"
+        user2 = User('Carol')
+        payment_args = (user2, 5.00, "Coffee")
+
+        user.add_to_balance(5.00)
+        user.pay(*payment_args)
+
+        mock_pay_with_balance.assert_called_once_with(*payment_args)
+
+    @patch.object(User, 'pay_with_balance', side_effect=PaymentException("Not enough balance to pay."))
+    @patch.object(User, 'pay_with_card', side_effect=PaymentException("Must have a credit card to make a payment."))
+    def test_pay_fail(self, mock_pay_with_card, mock_pay_with_balance):
+
+        user = User('Bobby')
+
+        user2 = User('Carol')
+        payment_args = (user2, 5.00, "Coffee")
+
+        user.add_to_balance(5.00)
+
+        with self.assertRaises(PaymentException) as err:
+            user.pay(*payment_args)
+            self.assertEqual(str(err.exception), "Must have a credit card to make a payment.")
+
+        mock_pay_with_card.assert_called_once_with(*payment_args)
+        mock_pay_with_balance.assert_called_once_with(*payment_args)
 
 
 if __name__ == "__main__":
